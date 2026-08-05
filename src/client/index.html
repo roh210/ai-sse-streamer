@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <script>
+        const sse = new EventSource('http://localhost:3000/api/streams/123');
+
+        sse.addEventListener('token', (event) => {
+            const data = JSON.parse(event.data);
+            console.log('Received token:', data.text);
+        });
+        sse.addEventListener('done', (event) => {
+            console.log('Stream done');
+            sse.close();
+        });
+        sse.addEventListener('error', (event) => {
+            if(event.data){
+                const data = JSON.parse(event.data);
+                console.error('Stream Error:', data.message);
+                sse.close();
+            }else{
+                console.error('Connection error (native EventSource error)', event);
+            }
+        });
+    </script>
+</head>
+<body>
+    
+</body>
+</html>
