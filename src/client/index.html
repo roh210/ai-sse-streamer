@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -16,17 +17,23 @@
             sse.close();
         });
         sse.addEventListener('error', (event) => {
-            if(event.data){
+            if (event.data) {
                 const data = JSON.parse(event.data);
                 console.error('Stream Error:', data.message);
                 sse.close();
-            }else{
+            } else {
                 console.error('Connection error (native EventSource error)', event);
             }
         });
+        sse.addEventListener('resync', (event) => {
+            console.log('Stream resync');
+            sse.close();
+        });
     </script>
 </head>
+
 <body>
-    
+
 </body>
+
 </html>

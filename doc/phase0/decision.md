@@ -1,5 +1,9 @@
 ## Phase 0 — Naive baseline
 
+**Overview of the phase:**
+
+![alt text](phase0-overview.png)
+
 **Background — why stream processing at all:**
 
 1. Metric/log time grouping and bucketing using sliding window
@@ -31,7 +35,8 @@ Three failures were exposed during this experiment:
 
 3. However, this is only correct for a single client — for multiple clients, aborting per-disconnect is wrong; the trigger needs to be the shared `Set<res>` for that streamId reaching empty, not any one client leaving. One important thing to note here is that these are synchronous calls — in this simple architecture there's no intermediary; this is `sse.ts` passing `signal` into `aiProvider.ts` as a function argument, so we have a reliable reference. As soon as we introduce Redis Streams we have an asynchronous pattern, a message broker — decoupled, but no longer a direct reference we can call into.
 
-   The importance is realising our system needs to react to events (hence EventSource) — we store the events themselves rather than relying on CDC. Change Data Capture propagates changes already made to some underlying database; what we're doing instead treats the events as the source of truth directly, with nothing underneath them to capture from.
+   The importance is realising our system needs to react to events (hence EventSource) — we store the events themselves rather than relying on CDC. Change Data Capture propagates changes already made to some underlying database; what we're doing instead treats the events as the source of truth directly, with nothing underneath them to capture from. 
+   ![alt text](cdc%20vs%20eventsource.png)
 
 **Reading applied:**
 
