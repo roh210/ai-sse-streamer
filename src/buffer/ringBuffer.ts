@@ -1,3 +1,5 @@
+import chalk from "chalk";
+
 type BufferedEvent = {
     id: number;
     event: 'token' | 'done' | 'error';
@@ -12,6 +14,7 @@ export const createRingBuffer = (capacity: number) => {
         const entry: BufferedEvent = { id: nextId++, event, data: JSON.stringify(data) };
 
         items.push(entry);
+        console.log(chalk.magenta('[buffer]', entry.id, entry.data))
 
         if (items.length > capacity) items.shift();
 
