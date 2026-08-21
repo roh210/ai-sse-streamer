@@ -29,5 +29,9 @@ export const createRingBuffer = (capacity: number) => {
         return items.slice(startIndex + 1);
     }
 
-    return { push, getFrom };
+    const getAll = () :BufferedEvent [] =>{
+        return [...items]
+    }
+
+    return { push, getFrom , getAll};
 }
