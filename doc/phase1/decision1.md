@@ -114,7 +114,7 @@ This is the same concurrent-generation bug from earlier in this document, reappe
 
 ![alt text](problemAtScale.png)
 
-The book provides two solutions (p.553–554): a shared datastore every instance reads and writes instead of local memory — Redis or sticky load balancing, pinning a session to one specific instance so it never needs to ask another one. The book calls sticky sessions "usually not recommended," because it's tying a client to one instance defeats a lot of the point of having redundant instances in the first place.
+The book provides two solutions (p.553–554): a shared datastore every instance reads and writes instead of local memory — Redis or sticky load balancing, pinning a session to one specific instance so it never needs to ask another one. The book calls sticky sessions "usually not recommended," becse it's tying a client to one instance defeats a lot of the point of having redundant instances in the first place.
 
 This is a real, not-yet-hit limitation worth pointing out: this project cannot currently run as more than one process without silently reintroducing the fan-out bug. Phase 2's move to Redis Streams isn't only solving durability - it's also what makes horizontal scaling possible at all, by replacing the in-process Singleton with a shared datastore every instance reads from, exactly what the book recommends.
 

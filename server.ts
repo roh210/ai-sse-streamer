@@ -2,9 +2,12 @@ import 'dotenv/config';
 import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
 import sseRouter from './src/routes/sse';
+import { connectRedis } from './src/redis/client';
 
 const app: Application = express();
 const PORT = 3000;
+
+connectRedis()
 
 app.use((req, res, next) => {
   console.log('[mw] incoming', req.method, req.url)
