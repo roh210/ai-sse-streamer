@@ -14,3 +14,10 @@ export const streamKey = (id: string) : string => {
   }
   return `stream:${id}`;
 };
+
+export const streamCountKey = (id: string) : string => {
+  if (!isValidStreamKey(id)) {
+    throw new Error(`Invalid stream count key: ${id}`);
+  }
+  return `count:${id}`;
+}
