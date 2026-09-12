@@ -1,8 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { streamTokens } from '../ai/aiProvider';
-import { createRingBuffer } from '../buffer/ringBuffer';
+
 import chalk from 'chalk';
-import { addClient, broadcast, closeAll, createGeneration, getGeneration, removeClient } from '../connection/connectionManager';
+import { deregister, register } from '../connection/connectionManager';
+import { resolveCursor } from '../consumer/resumeHandler';
+import { redisClient } from '../redis/client';
+import { streamKey } from '../redis/streamKeys';
 
 
 
@@ -13,31 +15,20 @@ const SSE_HEADERS = {
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
 }
+// now we mitigate our buffer 
+// register the connection 
+// cursor ownership - resolve the cursor - if the cursor is stale - we need to resync the client
+//use commands xread and xinfo to get the stream info and check if the cursor is stale
+// heart beat comment fail -- means to deregister the connection and close the stream
+// we know have a to resolve cursor that will replay history 
 
-const buffers = new Map<string, ReturnType<typeof createRingBuffer>>();
-let openCount  = 0
+let openCount = 0;
 
 router.get('/streams/:id', async (req: Request, res: Response) => {
     console.log(chalk.cyan('[sse] handler entered'))
 
     const streamId = req.params.id as string;
-    const abortController = new AbortController();
-    const lastEventId = req.headers['last-event-id'];
-
-    if (!buffers.has(streamId)) buffers.set(streamId, createRingBuffer(100));
-
-    const buffer = buffers.get(streamId)!;
-    const handleDisconnect = (streamId: string, res: Response) => {
-        req.on('close', () => {
-         openCount--
-         console.log(chalk.dim(`[listeners] open connections: ${openCount}`))
-            const controller = removeClient(streamId, res)
-            if (controller) {
-                console.log(chalk.yellow(`[${streamId}] Client disconnected`))
-                controller.abort()
-            }
-        })
-    }
+    const lastEventId = req.headers['last-event-id'] ?? null as string | null;
 
 
     res.writeHead(200, SSE_HEADERS);
@@ -45,72 +36,58 @@ router.get('/streams/:id', async (req: Request, res: Response) => {
     console.log(chalk.dim(`[open] ${openCount}`))
     res.flushHeaders(); // Flush the headers to establish SSE with the client
 
+    register(streamId, res);
 
-    if (lastEventId !== undefined) { // replay for one disconnected client // reconnection stage
-        const replayEvents = buffer.getFrom(Number(lastEventId));
-        if (replayEvents !== null) {
-            console.log(chalk.green(`[${streamId}] Replaying ${replayEvents.length} events`));
-            for (const entry of replayEvents) {
-                res.write(`id: ${entry.id}\nevent: ${entry.event}\ndata: ${entry.data}\n\n`);
-            }
+    let disconnected = false
+    let heartbeatTimer: NodeJS.Timeout | undefined;
 
-            const gen = getGeneration(streamId)
-            if (gen) {
-                // generation is still alive -- attach this to it stay open
-                gen.clients.add(res)
-                handleDisconnect(streamId, res)
-            } else {
-                // the generation has already finished - that was the whole remaining tail
-                res.end()
-            }
-        } else {
-            console.log(chalk.green(`[${streamId}] No events to replay`));
-            res.write(`event: resync\ndata: ${JSON.stringify({ message: 'No events to replay' })}\n\n`);
-            res.end()
-        }
+    heartbeatTimer = setInterval(() => {
+        if (disconnected) return
+        res.write(`event: heartbeat\ndata: ${JSON.stringify({ message: 'heartbeat' })}\n\n`);
+    }, 15000);
+
+    const handleDisconnect = () => {
+        if (disconnected) return
+        disconnected = true
+        openCount--
+        console.log(chalk.dim(`[close] ${openCount}`))
+        clearInterval(heartbeatTimer);
+        deregister(streamId, res);
+    }
+
+    res.on('error', () => handleDisconnect())
+    req.on('close', () => handleDisconnect())
+
+    // sse relay teritory
+
+    const cursorResult = await resolveCursor(streamId, lastEventId as string | null);
+
+    if (cursorResult.type === 'resync') {
+        res.write(`event: resync\ndata: ${JSON.stringify({ message: 'Cursor is stale, please resync' })}\n\n`);
+        res.end()
+        handleDisconnect()
         return
     }
 
-    if (getGeneration(streamId) === undefined) {  // creation stage - new client joins - broad cast
-        createGeneration(streamId, res, abortController)
-        handleDisconnect(streamId, res)
-        try {
-            for await (const token of streamTokens('Write a 300 word paragraph about the ocean', abortController.signal)) {
-                const event = buffer.push('token', { text: token });
-                console.log(chalk.gray(`[${streamId}] writing token`));
-                broadcast(streamId, `id: ${event.id}\nevent: token\ndata: ${JSON.stringify({ text: token })}\n\n`);
-            }
-            const endEvent = buffer.push('done', {});
-            broadcast(streamId, `id: ${endEvent.id}\nevent: done\ndata: {}\n\n`);
-            closeAll(streamId)
-        }
-        catch (error) {
-            if (abortController.signal.aborted) {
-                // last client already left - removeClient already deleted
-                // the generation and there's nobody to notify or close
-                console.log(chalk.yellow(`[${streamId}] Generation aborted, no clients remaining`))
-            } else {
-                console.error(chalk.red(`[${streamId}] Error streaming`, error))
-                broadcast(streamId, `event: error\ndata: ${JSON.stringify({ message: 'stream failed' })}\n\n`);
-                closeAll(streamId)
-            }
-            
-        }
-     return 
-    } else {   // joining client to an existing stream id - one client only
-        addClient(streamId, res)
-        handleDisconnect(streamId, res)
-        const history = buffer.getAll() //replay whatever is in the buffer for one specific client
-        const truncated = history.length > 0 && history[0].id !== 0 
-        if(truncated){
-            res.write(`event: partial\ndata: ${JSON.stringify({message:'Some earlier history was evicted'})}\n\n`)
-        }
-        console.log(chalk.green(`[${streamId}] Replaying ${history.length} events`));
-        for (const entry of history) {
-            res.write(`id: ${entry.id}\nevent: ${entry.event}\ndata: ${entry.data}\n\n`);
-        }
+    let cursorId = cursorResult.id
 
-        return
+
+    while (!disconnected) {
+        const result = await redisClient.xRead({ key: streamKey(streamId), id: cursorId }, { BLOCK: 0 });
+        const entries = result?.[0]?.messages ?? [];
+        if (disconnected) break
+        if (!entries || entries.length === 0) continue
+        for (const entry of entries) {
+            cursorId = entry.id
+            const eventType = entry.message.event
+            if (eventType === 'done' || eventType === 'error' || eventType === 'cancelled') {
+                res.write(`event: ${eventType}\ndata: ${JSON.stringify(entry.message)}\n\n`);
+                res.end()
+                handleDisconnect()
+                return
+            }
+            res.write(`event: token\nid: ${entry.id}\ndata: ${JSON.stringify({ text: entry.message.token })}\n\n`);
+        }
     }
 
     res.end();

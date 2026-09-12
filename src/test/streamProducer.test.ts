@@ -69,8 +69,8 @@ describe('stream Producer', () => {
             await startStreamProduction(streamId, 'irrelevant prompt')
 
             const entries = await redisClient.xRange(streamKey(streamId), '-', '+')
-
-            expect(entries.map((e) => e.message.token)).toEqual(['a', 'b', 'c'])
+            const tokenEntries = entries.filter((e) => 'token' in e.message)
+            expect(tokenEntries.map((e) => e.message.token)).toEqual(['a', 'b', 'c'])
         })
 
         it('throws if production is already in progress for this streamId', async () => {
@@ -96,11 +96,11 @@ describe('stream Producer', () => {
         beforeEach(async () => {
             await connectRedis()
             await redisClient.del(streamKey(streamId))
-             await redisClient.del(streamCountKey(streamId))
+            await redisClient.del(streamCountKey(streamId))
         })
         afterEach(async () => {
             await redisClient.del(streamKey(streamId))
-             await redisClient.del(streamCountKey(streamId))
+            await redisClient.del(streamCountKey(streamId))
         })
 
         it('stops the production and does not record further tokens', async () => {
@@ -118,16 +118,71 @@ describe('stream Producer', () => {
                 }
                 yield 'second'
             })
-            const productionPromise = startStreamProduction(streamId,'prompt')
-            await new Promise((resolve) => setTimeout(resolve,100))  
-            
+            const productionPromise = startStreamProduction(streamId, 'prompt')
+            await new Promise((resolve) => setTimeout(resolve, 100))
+
             stopStreamProduction(streamId)
             resolveToken!('second')
             await productionPromise
 
-            const entries = await redisClient.xRange(streamKey(streamId), '-','+')
-            expect(entries.map((e) => e.message.token)).toEqual(['first'])
+            const entries = await redisClient.xRange(streamKey(streamId), '-', '+')
+            const tokenEntries = entries.filter((e) => 'token' in e.message)
+
+            expect(tokenEntries.map((e) => e.message.token)).toEqual(['first'])
         });
     });
+
+    describe('terminal markers in the stream', () => {
+        const streamId = 'test-terminal-markers'
+        beforeEach(async () => {
+            await connectRedis()
+            await redisClient.del(streamKey(streamId))
+            await redisClient.del(streamCountKey(streamId))
+        })
+
+        afterEach(async () => {
+            await redisClient.del(streamKey(streamId))
+            await redisClient.del(streamCountKey(streamId))
+        })
+
+        it('writes a done marker as the last entry when production completes normally', async () => {
+            vi.mocked(streamTokens).mockImplementation(() => fakeTokens(['a', 'b']))
+            await startStreamProduction(streamId, 'prompt')
+
+            const entries = await redisClient.xRange(streamKey(streamId), '-', '+')
+
+            const lastEntry = entries[entries.length - 1]
+            expect(lastEntry.message.event).toBe('done')
+        })
+        it('cancellation writes a marker whose final_token_count matches tokens actually recorded', async () => {
+            let resolveToken: (value: string) => void
+
+            const tokenPromise = new Promise<string>((resolve) => {
+                resolveToken = resolve
+            })
+
+            vi.mocked(streamTokens).mockImplementation(async function* (_prompt, signal) {
+                yield 'first'
+                await tokenPromise
+                if (signal.aborted) throw new APIUserAbortError
+                yield 'second'
+            })
+
+            const productionPromise = startStreamProduction(streamId, 'prompt')
+            await new Promise((resolve) => setTimeout(resolve, 100))
+
+            stopStreamProduction(streamId)
+            resolveToken!('second')
+            await productionPromise
+
+            const entries = await redisClient.xRange(streamKey(streamId), '-', '+')
+
+            const count = await redisClient.get(streamCountKey(streamId));
+
+            const lastEntry = entries[entries.length - 1]
+            expect(lastEntry.message.event).toBe('cancelled')
+            expect(lastEntry.message.final_token_count).toBe(count)
+        })
+    })
 })
 

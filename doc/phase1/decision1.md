@@ -126,7 +126,7 @@ Mainly used [SSE guide](singhajit.com/server-sent-events-explained) to understan
 ![alt text](phaseevolution.jpg)
 
 **The file structure:**
-
+```
 ai-sse-streamer/
 ├── src/
 │   ├── ai/aiProvider.ts          # unchanged
@@ -137,6 +137,7 @@ ai-sse-streamer/
 ├── client/index.html             # unchanged
 ├── docs/decision.md
 └── .env
+```
 
 **The next phase:**
 

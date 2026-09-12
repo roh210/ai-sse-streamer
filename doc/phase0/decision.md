@@ -58,6 +58,8 @@ The wire format:
 - `retry:` — the integer time in milliseconds the client should wait before trying to reconnect if the connection drops.
 
 **What got built**
+
+```
 ai-sse-streamer/
 ├── src/
 │   ├── ai/aiProvider.ts     # wraps Anthropic SDK, yields tokens as an async generator
@@ -65,5 +67,6 @@ ai-sse-streamer/
 │   └── server.ts            # express app, mounts sseRouter, .listen()
 ├── client/index.html         # EventSource test harness
 └── .env                       # ANTHROPIC_API_KEY (gitignored)
+```
 
 **Next:** In Phase 1, we will create a minimal buffer that will store the messages and allow for reconnection using EventSource's `Last-Event-ID`.
